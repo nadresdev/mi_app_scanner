@@ -1,0 +1,52 @@
+/* Estilos personalizados para la aplicación */
+.main {
+    background-color: #f0f2f6;
+}
+
+.stButton>button {
+    border-radius: 10px;
+    height: 3em;
+    font-weight: bold;
+    border: none;
+}
+
+/* Botón primario */
+.stButton>button:first-child:not(:disabled) {
+    background-color: #FF4B4B;
+    color: white;
+}
+
+/* Botón secundario */
+.stButton>button:not(:first-child):not(:disabled) {
+    background-color: #0083B8;
+    color: white;
+}
+
+.scanner-frame {
+    border: 3px solid #00cc00;
+    border-radius: 10px;
+    padding: 10px;
+    background-color: #000000;
+}
+
+.digits-result {
+    font-size: 2.5em;
+    font-weight: bold;
+    color: #00cc00;
+    text-align: center;
+    padding: 20px;
+    background-color: #000000;
+    border-radius: 10px;
+    border: 2px solid #00cc00;
+    margin: 10px 0;
+}
+
+/* Mejoras visuales para los controles */
+.sidebar .sidebar-content {
+    background-color: #f8f9fa;
+}
+
+/* Estilo para mensajes de estado */
+.stAlert {
+    border-radius: 10px;
+}
