@@ -124,13 +124,6 @@ def preprocess_image(image):
     except Exception as e:
         return image
 
-def resize_image(image, scale_percent):
-    """Redimensiona imagen por porcentaje"""
-    width = int(image.shape[1] * scale_percent / 100)
-    height = int(image.shape[0] * scale_percent / 100)
-    dim = (width, height)
-    return cv2.resize(image, dim, interpolation=cv2.INTER_AREA)
-
 # ========== APLICACIÓN STREAMLIT ==========
 st.set_page_config(
     page_title="Escáner de Dígitos - Selección Táctil",
@@ -347,7 +340,7 @@ def main():
         st.error("❌ Servicio OCR no disponible")
         return
 
-    # Estado de la aplicación
+    # Inicializar estado de la aplicación
     if 'current_step' not in st.session_state:
         st.session_state.current_step = 1
         st.session_state.captured_image = None
@@ -355,21 +348,34 @@ def main():
         st.session_state.analysis_done = False
         st.session_state.image_scale = 100
 
-    # Indicador de pasos
+    # Indicador de pasos - CORREGIDO para evitar el error
     col1, col2, col3 = st.columns(3)
+    
     with col1:
-        step1 = "🔵" if st.session_state.current_step == 1 else "✅"
-        st.markdown(f"### {step1} Paso 1")
+        step1_icon = "🔵" if st.session_state.current_step == 1 else "✅"
+        st.markdown(f"### {step1_icon} Paso 1")
         st.markdown("Capturar imagen")
     
     with col2:
-        step2 = "🔵" if st.session_state.current_step == 2 else "✅" if st.session_state.captured_image else "⚪"
-        st.markdown(f"### {step2} Paso 2")
+        # Verificar si hay imagen capturada de forma segura
+        has_captured_image = st.session_state.captured_image is not None
+        if has_captured_image:
+            # Verificar que captured_image no sea un array vacío
+            try:
+                if hasattr(st.session_state.captured_image, 'size'):
+                    has_captured_image = st.session_state.captured_image.size > 0
+                else:
+                    has_captured_image = False
+            except:
+                has_captured_image = False
+        
+        step2_icon = "🔵" if st.session_state.current_step == 2 else "✅" if has_captured_image else "⚪"
+        st.markdown(f"### {step2_icon} Paso 2")
         st.markdown("Alinear dígitos")
     
     with col3:
-        step3 = "🔵" if st.session_state.current_step == 3 else "✅" if st.session_state.analysis_done else "⚪"
-        st.markdown(f"### {step3} Paso 3")
+        step3_icon = "🔵" if st.session_state.current_step == 3 else "✅" if st.session_state.analysis_done else "⚪"
+        st.markdown(f"### {step3_icon} Paso 3")
         st.markdown("Resultados")
 
     st.markdown("---")
@@ -396,19 +402,39 @@ def main():
         )
         
         if camera_image is not None:
-            # Convertir y almacenar la imagen
-            image_bytes = camera_image.getvalue()
-            image_array = np.frombuffer(image_bytes, np.uint8)
-            st.session_state.captured_image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
-            
-            st.success("✅ ¡Imagen capturada! Ahora puedes alinear los dígitos.")
-            
-            if st.button("➡️ Continuar a Alineación", use_container_width=True, type="primary"):
-                st.session_state.current_step = 2
-                st.rerun()
+            try:
+                # Convertir y almacenar la imagen
+                image_bytes = camera_image.getvalue()
+                image_array = np.frombuffer(image_bytes, np.uint8)
+                captured_image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+                
+                # Verificar que la imagen se cargó correctamente
+                if captured_image is not None and captured_image.size > 0:
+                    st.session_state.captured_image = captured_image
+                    st.success("✅ ¡Imagen capturada! Ahora puedes alinear los dígitos.")
+                    
+                    if st.button("➡️ Continuar a Alineación", use_container_width=True, type="primary"):
+                        st.session_state.current_step = 2
+                        st.rerun()
+                else:
+                    st.error("❌ Error al procesar la imagen capturada")
+                    
+            except Exception as e:
+                st.error(f"❌ Error al procesar la imagen: {e}")
 
     # PASO 2: ALINEAR DÍGITOS CON INTERACCIÓN TÁCTIL
-    elif st.session_state.current_step == 2 and st.session_state.captured_image is not None:
+    elif st.session_state.current_step == 2:
+        # Verificar que tenemos una imagen válida
+        if (st.session_state.captured_image is None or 
+            not hasattr(st.session_state.captured_image, 'size') or 
+            st.session_state.captured_image.size == 0):
+            
+            st.error("❌ No hay imagen válida capturada. Regresando al paso 1.")
+            st.session_state.current_step = 1
+            st.session_state.captured_image = None
+            st.rerun()
+            return
+        
         st.subheader("🎯 Paso 2: Alinear Dígitos en el Rectángulo")
         
         st.markdown("""
@@ -424,21 +450,30 @@ def main():
         """, unsafe_allow_html=True)
         
         # Convertir imagen para mostrar
-        image_rgb = cv2.cvtColor(st.session_state.captured_image, cv2.COLOR_BGR2RGB)
-        pil_image = Image.fromarray(image_rgb)
-        
-        # Mostrar contenedor interactivo
-        st.markdown("""
-        <div class="touch-container">
-            <div class="scanner-overlay">
-                <div class="overlay-text">Área de Análisis</div>
-            </div>
-        """, unsafe_allow_html=True)
-        
-        # Mostrar imagen como interactiva
-        st.image(pil_image, use_column_width=True, caption="Arrastra y haz zoom para alinear los dígitos", output_format="JPEG")
-        
-        st.markdown("</div>", unsafe_allow_html=True)
+        try:
+            image_rgb = cv2.cvtColor(st.session_state.captured_image, cv2.COLOR_BGR2RGB)
+            pil_image = Image.fromarray(image_rgb)
+            
+            # Mostrar contenedor interactivo
+            st.markdown("""
+            <div class="touch-container">
+                <div class="scanner-overlay">
+                    <div class="overlay-text">Área de Análisis</div>
+                </div>
+            """, unsafe_allow_html=True)
+            
+            # Mostrar imagen como interactiva
+            st.image(pil_image, use_column_width=True, caption="Arrastra y haz zoom para alinear los dígitos", output_format="JPEG")
+            
+            st.markdown("</div>", unsafe_allow_html=True)
+            
+        except Exception as e:
+            st.error(f"❌ Error al mostrar la imagen: {e}")
+            if st.button("🔄 Volver a Capturar", use_container_width=True):
+                st.session_state.current_step = 1
+                st.session_state.captured_image = None
+                st.rerun()
+            return
         
         # Controles de zoom adicionales
         st.markdown("""
@@ -451,7 +486,6 @@ def main():
         col1, col2 = st.columns(2)
         with col1:
             if st.button("↔️ Centrar Horizontal", use_container_width=True):
-                # Lógica para centrar (simulada)
                 st.info("Imagen centrada horizontalmente")
         
         with col2:
@@ -465,53 +499,57 @@ def main():
             if st.button("🔍 ANALIZAR DÍGITOS EN EL RECTÁNGULO", use_container_width=True, type="primary"):
                 # El rectángulo está fijo en el centro, calcular área relativa
                 with st.spinner("Analizando dígitos en el área seleccionada..."):
-                    # Coordenadas del rectángulo fijo (centro de la imagen)
-                    img_height, img_width = st.session_state.captured_image.shape[:2]
-                    
-                    # Tamaño del rectángulo (fijo)
-                    rect_width = 250
-                    rect_height = 120
-                    
-                    # Calcular posición centrada
-                    rect_x = (img_width - rect_width) // 2
-                    rect_y = (img_height - rect_height) // 2
-                    
-                    # Asegurar que las coordenadas estén dentro de la imagen
-                    rect_x = max(0, min(rect_x, img_width - rect_width))
-                    rect_y = max(0, min(rect_y, img_height - rect_height))
-                    
-                    # Extraer área del rectángulo
-                    roi = get_roi(st.session_state.captured_image, rect_x, rect_y, rect_width, rect_height)
-                    
-                    if roi.size > 0:
-                        # Mostrar área que se va a analizar
-                        with st.expander("🔍 Ver Área Exacta a Analizar", expanded=True):
-                            col_a, col_b = st.columns(2)
-                            with col_a:
-                                st.image(
-                                    cv2.cvtColor(roi, cv2.COLOR_BGR2RGB),
-                                    use_column_width=True,
-                                    caption=f"Área del rectángulo ({roi.shape[1]}×{roi.shape[0]}px)"
-                                )
-                            with col_b:
-                                processed_roi = preprocess_image(roi)
-                                st.image(
-                                    processed_roi,
-                                    use_column_width=True,
-                                    caption="Versión procesada",
-                                    clamp=True
-                                )
+                    try:
+                        # Coordenadas del rectángulo fijo (centro de la imagen)
+                        img_height, img_width = st.session_state.captured_image.shape[:2]
                         
-                        # Extraer dígitos
-                        digits, _ = extract_digits_with_api(roi)
+                        # Tamaño del rectángulo (fijo)
+                        rect_width = 250
+                        rect_height = 120
                         
-                        st.session_state.captured_digits = digits
-                        st.session_state.analysis_done = True
-                        st.session_state.current_step = 3
+                        # Calcular posición centrada
+                        rect_x = (img_width - rect_width) // 2
+                        rect_y = (img_height - rect_height) // 2
                         
-                        st.rerun()
-                    else:
-                        st.error("❌ No se pudo extraer el área del rectángulo")
+                        # Asegurar que las coordenadas estén dentro de la imagen
+                        rect_x = max(0, min(rect_x, img_width - rect_width))
+                        rect_y = max(0, min(rect_y, img_height - rect_height))
+                        
+                        # Extraer área del rectángulo
+                        roi = get_roi(st.session_state.captured_image, rect_x, rect_y, rect_width, rect_height)
+                        
+                        if roi is not None and roi.size > 0:
+                            # Mostrar área que se va a analizar
+                            with st.expander("🔍 Ver Área Exacta a Analizar", expanded=True):
+                                col_a, col_b = st.columns(2)
+                                with col_a:
+                                    st.image(
+                                        cv2.cvtColor(roi, cv2.COLOR_BGR2RGB),
+                                        use_column_width=True,
+                                        caption=f"Área del rectángulo ({roi.shape[1]}×{roi.shape[0]}px)"
+                                    )
+                                with col_b:
+                                    processed_roi = preprocess_image(roi)
+                                    st.image(
+                                        processed_roi,
+                                        use_container_width=True,
+                                        caption="Versión procesada",
+                                        clamp=True
+                                    )
+                            
+                            # Extraer dígitos
+                            digits, _ = extract_digits_with_api(roi)
+                            
+                            st.session_state.captured_digits = digits
+                            st.session_state.analysis_done = True
+                            st.session_state.current_step = 3
+                            
+                            st.rerun()
+                        else:
+                            st.error("❌ No se pudo extraer el área del rectángulo")
+                            
+                    except Exception as e:
+                        st.error(f"❌ Error al procesar el área seleccionada: {e}")
         
         # Botón para volver
         if st.button("🔄 Tomar Otra Foto", use_container_width=True, type="secondary"):
@@ -523,7 +561,10 @@ def main():
     elif st.session_state.current_step == 3:
         st.subheader("📊 Paso 3: Resultados del Análisis")
         
-        if st.session_state.captured_digits and not st.session_state.captured_digits.startswith("Error") and not st.session_state.captured_digits.startswith("No se"):
+        if (st.session_state.captured_digits and 
+            not st.session_state.captured_digits.startswith("Error") and 
+            not st.session_state.captured_digits.startswith("No se")):
+            
             # Mostrar dígitos detectados
             st.markdown(f'<div class="digits-result">{st.session_state.captured_digits}</div>', 
                        unsafe_allow_html=True)
