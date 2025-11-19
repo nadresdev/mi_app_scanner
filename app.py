@@ -7,38 +7,44 @@ import subprocess
 import sys
 from PIL import Image
 
-# ========== CONFIGURACIÓN TESSERACT PARA STREAMLIT CLOUD ==========
+# ========== CONFIGURACIÓN TESSERACT OPTIMIZADA PARA STREAMLIT CLOUD ==========
 def setup_tesseract():
     """Configura Tesseract para Streamlit Cloud"""
     try:
-        # En Streamlit Cloud, Tesseract está en el PATH
-        result = subprocess.run(['which', 'tesseract'], 
-                              capture_output=True, text=True, shell=False)
-        if result.returncode == 0:
-            tesseract_path = result.stdout.strip()
-            st.success(f"✅ Tesseract encontrado en: {tesseract_path}")
-            
+        # En Streamlit Cloud, usar ruta directa
+        tesseract_cmd = '/usr/bin/tesseract'
+        
+        if os.path.exists(tesseract_cmd):
             import pytesseract
-            pytesseract.pytesseract.tesseract_cmd = tesseract_path
+            pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
             
-            # Verificar versión
+            # Verificar que funciona
             version = pytesseract.get_tesseract_version()
-            st.success(f"✅ Tesseract versión: {version}")
-            return True, tesseract_path
+            st.success(f"✅ Tesseract configurado. Versión: {version}")
+            return True, tesseract_cmd
         else:
-            st.error("❌ Tesseract no encontrado en el sistema")
-            return False, None
-            
+            # Intentar encontrar con which
+            result = subprocess.run(['which', 'tesseract'], 
+                                  capture_output=True, text=True, shell=False)
+            if result.returncode == 0:
+                tesseract_path = result.stdout.strip()
+                import pytesseract
+                pytesseract.pytesseract.tesseract_cmd = tesseract_path
+                st.success(f"✅ Tesseract encontrado en: {tesseract_path}")
+                return True, tesseract_path
+            else:
+                st.error("❌ Tesseract no encontrado en el sistema")
+                return False, None
+                
     except Exception as e:
         st.error(f"❌ Error configurando Tesseract: {e}")
         return False, None
 
-# Configurar al inicio
+# Configurar Tesseract
 TESSERACT_AVAILABLE, TESSERACT_PATH = setup_tesseract()
 
 if TESSERACT_AVAILABLE:
     import pytesseract
-
 # ========== FUNCIONES DE CÁMARA ==========
 def initialize_camera(camera_index=0):
     """Inicializa la cámara (solo funciona localmente)"""
