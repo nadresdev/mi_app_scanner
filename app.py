@@ -198,12 +198,22 @@ st.markdown("""
         padding: 10px;
         background: #000;
         margin: 10px 0;
+        position: relative;
     }
     .success-box {
         background-color: #e8f5e8;
         padding: 20px;
         border-radius: 15px;
         border-left: 5px solid #4CAF50;
+    }
+    .scanner-overlay {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        border: 3px solid #00ff00;
+        border-radius: 10px;
+        pointer-events: none;
     }
     @media (max-width: 768px) {
         .digits-result {
@@ -228,33 +238,66 @@ def main():
         st.session_state.camera_captured = None
         st.session_state.captured_digits = ""
         st.session_state.analysis_done = False
+        st.session_state.rect_x = 100
+        st.session_state.rect_y = 150
+        st.session_state.rect_width = 200
+        st.session_state.rect_height = 100
 
     # Sidebar para configuración
-    st.sidebar.title("⚙️ Configuración")
+    st.sidebar.title("⚙️ Configuración del Escáner")
     
     # Configuración del área de escaneo
-    st.sidebar.subheader("🎯 Área de Escaneo")
+    st.sidebar.subheader("🎯 Ajustar Área de Escaneo")
     
-    rect_x = st.sidebar.slider("Posición X", 50, 400, 100, 10,
-                              help="Posición horizontal del rectángulo")
-    rect_y = st.sidebar.slider("Posición Y", 50, 400, 150, 10,
-                              help="Posición vertical del rectángulo")
-    rect_width = st.sidebar.slider("Ancho", 100, 400, 200, 10,
-                                  help="Ancho del área de escaneo")
-    rect_height = st.sidebar.slider("Alto", 50, 300, 100, 10,
-                                   help="Alto del área de escaneo")
+    st.session_state.rect_x = st.sidebar.slider(
+        "Posición Horizontal", 
+        50, 400, st.session_state.rect_x, 10,
+        help="Mueve el rectángulo izquierda/derecha"
+    )
+    
+    st.session_state.rect_y = st.sidebar.slider(
+        "Posición Vertical", 
+        50, 400, st.session_state.rect_y, 10,
+        help="Mueve el rectángulo arriba/abajo"
+    )
+    
+    st.session_state.rect_width = st.sidebar.slider(
+        "Ancho del Rectángulo", 
+        100, 400, st.session_state.rect_width, 10,
+        help="Ajusta el ancho del área de escaneo"
+    )
+    
+    st.session_state.rect_height = st.sidebar.slider(
+        "Alto del Rectángulo", 
+        50, 300, st.session_state.rect_height, 10,
+        help="Ajusta el alto del área de escaneo"
+    )
     
     st.sidebar.markdown("---")
     
     # Información del área seleccionada
     st.sidebar.markdown(f"""
-    **Área de Escaneo:**
-    - 📍 Posición: ({rect_x}, {rect_y})
-    - 📏 Tamaño: {rect_width} × {rect_height} px
+    **📐 Área Configurada:**
+    - **Posición:** ({st.session_state.rect_x}, {st.session_state.rect_y})
+    - **Tamaño:** {st.session_state.rect_width} × {st.session_state.rect_height} px
+    - **Área:** {st.session_state.rect_width * st.session_state.rect_height} px²
+    
+    **💡 Consejo:**
+    Ajusta el rectángulo para que cubra
+    exactamente los dígitos que quieres escanear.
     """)
 
-    # Área principal - Cámara
-    st.subheader("📷 Toma una Foto con tu Cámara")
+    # Área principal - Cámara con rectángulo integrado
+    st.subheader("📷 Vista de la Cámara con Área de Escaneo")
+    
+    # Instrucciones
+    st.info("""
+    **🎯 Instrucciones:**
+    1. **Alinea los dígitos** dentro del rectángulo verde en el visor de la cámara
+    2. **Ajusta el rectángulo** si es necesario desde la barra lateral  
+    3. **Presiona CAPTURAR** cuando los dígitos estén bien alineados
+    4. **Revisa los resultados** abajo
+    """)
     
     # Usar el componente de cámara de Streamlit
     camera_image = st.camera_input(
@@ -268,40 +311,66 @@ def main():
         image_array = np.frombuffer(image_bytes, np.uint8)
         original_image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
         
-        # Dibujar rectángulo en la imagen
-        image_with_rect = draw_scanner_zone(original_image, rect_x, rect_y, rect_width, rect_height)
+        # Dibujar rectángulo DIRECTAMENTE en la imagen de la cámara
+        image_with_rect = draw_scanner_zone(
+            original_image, 
+            st.session_state.rect_x,
+            st.session_state.rect_y, 
+            st.session_state.rect_width,
+            st.session_state.rect_height
+        )
         
-        # Mostrar imagen con el rectángulo
+        # Mostrar imagen con el rectángulo integrado
         st.markdown('<div class="camera-container">', unsafe_allow_html=True)
         st.image(
             cv2.cvtColor(image_with_rect, cv2.COLOR_BGR2RGB),
             use_column_width=True,
-            caption="📱 Vista de la cámara - Alinea los dígitos dentro del rectángulo verde"
+            caption="👆 Los dígitos DENTRO de este rectángulo verde serán analizados al capturar"
         )
         st.markdown('</div>', unsafe_allow_html=True)
         
-        # Botón para capturar y analizar
+        # Botón para capturar y analizar el área del rectángulo
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
-            if st.button("🎯 CAPTURAR Y ANALIZAR", use_container_width=True, type="primary"):
-                with st.spinner("Procesando imagen..."):
-                    # Extraer ROI basado en la configuración
-                    roi = get_roi(original_image, rect_x, rect_y, rect_width, rect_height)
+            capture_button = st.button(
+                "🎯 CAPTURAR Y ANALIZAR ÁREA SELECCIONADA", 
+                use_container_width=True, 
+                type="primary"
+            )
+            
+            if capture_button:
+                with st.spinner("Procesando área seleccionada..."):
+                    # Extraer EXACTAMENTE el área dentro del rectángulo verde
+                    roi = get_roi(
+                        original_image, 
+                        st.session_state.rect_x,
+                        st.session_state.rect_y, 
+                        st.session_state.rect_width,
+                        st.session_state.rect_height
+                    )
                     
                     if roi.size > 0:
+                        # Mostrar el área exacta que se va a analizar
+                        with st.expander("🔍 Ver Área Exacta a Analizar"):
+                            st.image(
+                                cv2.cvtColor(roi, cv2.COLOR_BGR2RGB),
+                                use_column_width=True,
+                                caption=f"Esta área de {st.session_state.rect_width}x{st.session_state.rect_height}px será analizada"
+                            )
+                        
                         # Preprocesar la imagen
                         processed_roi = preprocess_image(roi)
                         
-                        # Mostrar el área que se va a analizar
-                        with st.expander("🔍 Ver Área a Analizar"):
+                        # Mostrar versión procesada
+                        with st.expander("🔄 Ver Área Procesada"):
                             st.image(
                                 processed_roi,
                                 use_column_width=True,
-                                caption="Esta es el área que se enviará al OCR",
+                                caption="Versión procesada para mejor OCR",
                                 clamp=True
                             )
                         
-                        # Extraer dígitos usando API
+                        # Extraer dígitos usando API (del área del rectángulo)
                         digits, _ = extract_digits_with_api(roi)
                         
                         st.session_state.camera_captured = original_image
@@ -312,9 +381,9 @@ def main():
                             st.success("✅ ¡Análisis completado!")
                             st.balloons()
                         else:
-                            st.warning("⚠️ No se pudieron detectar dígitos claros")
+                            st.warning("⚠️ No se detectaron dígitos en el área seleccionada")
                     else:
-                        st.error("❌ El área de escaneo no es válida")
+                        st.error("❌ El área de escaneo seleccionada no es válida")
     
     # Mostrar resultados
     st.markdown("---")
@@ -326,12 +395,15 @@ def main():
             st.markdown(f'<div class="digits-result">{st.session_state.captured_digits}</div>', 
                        unsafe_allow_html=True)
             
+            # Información del análisis
+            st.success(f"✅ Se analizó un área de {st.session_state.rect_width}×{st.session_state.rect_height}px")
+            
             # Botones de acción
             col_btn1, col_btn2 = st.columns(2)
             with col_btn1:
                 if st.button("📋 Copiar Resultados", use_container_width=True, type="secondary"):
                     st.code(st.session_state.captured_digits)
-                    st.success("✅ ¡Resultados copiados!")
+                    st.success("✅ ¡Resultados copiados al portapapeles!")
             with col_btn2:
                 if st.button("🔄 Nueva Captura", use_container_width=True):
                     st.session_state.camera_captured = None
@@ -339,77 +411,54 @@ def main():
                     st.session_state.analysis_done = False
                     st.rerun()
             
-            # Consejos
-            with st.expander("💡 Consejos para mejor detección"):
-                st.markdown("""
-                **Para mejor precisión:**
-                - ✅ Buena iluminación
-                - ✅ Enfoca bien los dígitos
-                - ✅ Dígitos contrastados con el fondo
-                - ✅ Evita sombras y reflejos
-                - ✅ Mantén el teléfono estable
-                """)
         else:
             st.warning(f"⚠️ {st.session_state.captured_digits}")
             st.info("""
-            **Sugerencias:**
-            - Ajusta la posición del rectángulo en la barra lateral
-            - Mejora la iluminación
-            - Acércate más a los dígitos
-            - Asegúrate de que los dígitos estén dentro del rectángulo verde
+            **💡 Sugerencias para mejor detección:**
+            - Ajusta el tamaño y posición del rectángulo en la barra lateral
+            - Mejora la iluminación de los dígitos
+            - Asegúrate de que los dígitos estén COMPLETAMENTE dentro del rectángulo verde
+            - Los dígitos deben tener buen contraste con el fondo
             """)
     
     else:
         st.info("""
         <div class="info-box">
-            <h3>👆 Instrucciones Rápidas:</h3>
-            <ol>
-                <li><strong>Permite el acceso</strong> a la cámara cuando Streamlit lo solicite</li>
-                <li><strong>Apunta la cámara</strong> a los dígitos que quieres escanear</li>
-                <li><strong>Alinea los dígitos</strong> dentro del rectángulo verde</li>
-                <li><strong>Presiona "CAPTURAR Y ANALIZAR"</strong> para procesar</li>
-                <li><strong>Copia los resultados</strong> o haz una nueva captura</li>
-            </ol>
+            <h3>👆 Listo para Escanear</h3>
+            <p>Los dígitos detectados aparecerán aquí después de capturar.</p>
             
-            <p><strong>📱 Optimizado para móviles:</strong></p>
+            <p><strong>🎯 Lo que se analiza:</strong></p>
             <ul>
-                <li>Interfaz responsive</li>
-                <li>Botones grandes y fáciles de tocar</li>
-                <li>Procesamiento rápido</li>
-                <li>Resultados claros y copiables</li>
+                <li>Solo el área DENTRO del rectángulo verde</li>
+                <li>Todo fuera del rectángulo se ignora</li>
+                <li>Puedes ajustar el rectángulo en la barra lateral</li>
+                <li>Resultados inmediatos después de capturar</li>
             </ul>
         </div>
         """, unsafe_allow_html=True)
     
     # Información adicional
-    with st.expander("ℹ️ Acerca de esta App"):
+    with st.expander("ℹ️ Cómo Funciona el Escáner"):
         st.markdown("""
-        ### 🎯 Características
+        ### 🎯 Tecnología de Escaneo
         
-        **Para Usuarios Móviles:**
-        - 📱 Acceso directo a la cámara del celular
-        - 🟩 Rectángulo verde para guiar el escaneo
-        - 🎯 Un solo botón para capturar y analizar
-        - 📊 Resultados inmediatos y copiables
+        **Proceso Exacto:**
+        1. **Vista de cámara en vivo** con rectángulo superpuesto
+        2. **Captura de imagen** cuando presionas el botón
+        3. **Extracción automática** del área dentro del rectángulo verde
+        4. **Procesamiento OCR** solo de esa área específica
+        5. **Resultados** de los dígitos detectados
         
-        **Tecnología:**
-        - 🌐 OCR online profesional
-        - 🚀 Procesamiento en la nube
-        - 📡 Funciona con conexión a internet
-        - 🔒 No se almacenan las imágenes
+        **¿Qué área se analiza?**
+        - ✅ Solo lo que está DENTRO del rectángulo verde
+        - ❌ Todo lo fuera del rectángulo se descarta
+        - 📏 El tamaño y posición son ajustables
         
-        ### 📝 Cómo Usar
-        
-        1. **Permitir cámara** - La app pedirá acceso a tu cámara
-        2. **Encuadrar dígitos** - Apunta a los números que quieres escanear
-        3. **Alinear** - Los dígitos deben estar dentro del rectángulo verde
-        4. **Capturar** - Toca el botón grande azul
-        5. **Listo** - Los resultados aparecen automáticamente
-        
-        ### ⚡ Consejos Móviles
-        - Usa el modo horizontal para mejor visualización
-        - Mantén el teléfono estable al capturar
+        **Para mejor precisión:**
+        - Ajusta el rectángulo para que cubra solo los dígitos
+        - Evita incluir fondo innecesario
         - Buena iluminación = mejor reconocimiento
+        - Dígitos claros y contrastados
         """)
 
 if __name__ == "__main__":
