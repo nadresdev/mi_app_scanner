@@ -15,7 +15,7 @@ def setup_ocr():
         # OCR.space API Key (gratuita para uso limitado)
         API_KEYS = [
             'helloworld',  # Clave pública gratuita
-            'K89947096688957'  # Clave de ejemplo (puede tener límites)
+            'K89947096688957'  # Clave de ejemplo
         ]
         
         st.success("✅ OCR configurado usando API online")
@@ -27,32 +27,34 @@ def setup_ocr():
 OCR_AVAILABLE, API_KEY = setup_ocr()
 
 # ========== FUNCIONES DE LA APLICACIÓN ==========
-def draw_scanner_zone(frame, x, y, width, height):
-    """Dibuja el rectángulo de escaneo"""
+def draw_scanner_zone(image, x, y, width, height, color=(0, 255, 0), thickness=2):
+    """Dibuja el rectángulo de escaneo en la imagen"""
+    img_copy = image.copy()
+    
     # Rectángulo principal
-    cv2.rectangle(frame, (x, y), (x + width, y + height), (0, 255, 0), 2)
+    cv2.rectangle(img_copy, (x, y), (x + width, y + height), color, thickness)
     
     # Esquinas decorativas
     corner_length = 20
-    thickness = 3
+    corner_thickness = 3
     
     # Esquina superior izquierda
-    cv2.line(frame, (x, y), (x + corner_length, y), (0, 255, 0), thickness)
-    cv2.line(frame, (x, y), (x, y + corner_length), (0, 255, 0), thickness)
+    cv2.line(img_copy, (x, y), (x + corner_length, y), color, corner_thickness)
+    cv2.line(img_copy, (x, y), (x, y + corner_length), color, corner_thickness)
     
     # Esquina superior derecha
-    cv2.line(frame, (x + width, y), (x + width - corner_length, y), (0, 255, 0), thickness)
-    cv2.line(frame, (x + width, y), (x + width, y + corner_length), (0, 255, 0), thickness)
+    cv2.line(img_copy, (x + width, y), (x + width - corner_length, y), color, corner_thickness)
+    cv2.line(img_copy, (x + width, y), (x + width, y + corner_length), color, corner_thickness)
     
     # Esquina inferior izquierda
-    cv2.line(frame, (x, y + height), (x + corner_length, y + height), (0, 255, 0), thickness)
-    cv2.line(frame, (x, y + height), (x, y + height - corner_length), (0, 255, 0), thickness)
+    cv2.line(img_copy, (x, y + height), (x + corner_length, y + height), color, corner_thickness)
+    cv2.line(img_copy, (x, y + height), (x, y + height - corner_length), color, corner_thickness)
     
     # Esquina inferior derecha
-    cv2.line(frame, (x + width, y + height), (x + width - corner_length, y + height), (0, 255, 0), thickness)
-    cv2.line(frame, (x + width, y + height), (x + width, y + height - corner_length), (0, 255, 0), thickness)
+    cv2.line(img_copy, (x + width, y + height), (x + width - corner_length, y + height), color, corner_thickness)
+    cv2.line(img_copy, (x + width, y + height), (x + width, y + height - corner_length), color, corner_thickness)
     
-    return frame
+    return img_copy
 
 def get_roi(image, x, y, width, height):
     """Extrae región de interés"""
@@ -154,7 +156,7 @@ def preprocess_image(image):
 
 # ========== APLICACIÓN STREAMLIT ==========
 st.set_page_config(
-    page_title="Escáner de Dígitos con OCR Online",
+    page_title="Escáner de Dígitos - Selección Interactiva",
     page_icon="🔢",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -194,10 +196,17 @@ st.markdown("""
         border-radius: 10px;
         border-left: 5px solid #4CAF50;
     }
+    .selection-info {
+        background-color: #fff3cd;
+        padding: 15px;
+        border-radius: 10px;
+        border-left: 5px solid #ffc107;
+        margin: 10px 0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🔢 Escáner de Dígitos con OCR Online")
+st.title("🔢 Escáner de Dígitos - Selección Interactiva")
 st.markdown("---")
 
 def main():
@@ -208,142 +217,229 @@ def main():
     else:
         st.success("✅ Servicio OCR online listo!")
 
+    # Estado de la aplicación
+    if 'uploaded_image' not in st.session_state:
+        st.session_state.uploaded_image = None
+        st.session_state.captured_digits = ""
+        st.session_state.selection_made = False
+        st.session_state.selection_coords = {'x': 0, 'y': 0, 'width': 200, 'height': 100}
+        st.session_state.processed_roi = None
+
     # Sidebar
     st.sidebar.title("⚙️ Configuración")
     
-    # Configuración área de escaneo
-    st.sidebar.subheader("Área de Escaneo")
-    rect_x = st.sidebar.slider("Posición X", 50, 600, 150, 10)
-    rect_y = st.sidebar.slider("Posición Y", 50, 400, 150, 10)
-    rect_width = st.sidebar.slider("Ancho", 200, 500, 300, 10)
-    rect_height = st.sidebar.slider("Alto", 80, 300, 120, 10)
-    
-    # Estado de la aplicación
-    if 'captured_digits' not in st.session_state:
-        st.session_state.captured_digits = ""
-        st.session_state.captured_image = None
-    
-    # Área principal
-    st.subheader("📤 Subir Imagen para Escanear Dígitos")
-    
-    uploaded_file = st.file_uploader(
-        "Selecciona una imagen que contenga dígitos",
+    # Paso 1: Subir imagen
+    st.sidebar.subheader("📤 Paso 1: Subir Imagen")
+    uploaded_file = st.sidebar.file_uploader(
+        "Selecciona una imagen con dígitos",
         type=['png', 'jpg', 'jpeg'],
-        help="La imagen debe tener dígitos claros y buen contraste"
+        key="file_uploader"
     )
     
     if uploaded_file is not None:
-        # Leer imagen
+        # Leer y almacenar la imagen
         file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-        image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+        st.session_state.uploaded_image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+        st.session_state.selection_made = False
+        st.session_state.captured_digits = ""
+
+    # Mostrar imagen subida
+    if st.session_state.uploaded_image is not None:
+        # Paso 2: Configurar área de selección
+        st.sidebar.subheader("🎯 Paso 2: Configurar Área de Análisis")
         
-        # Dibujar rectángulo en la imagen
-        image_with_rect = draw_scanner_zone(image.copy(), rect_x, rect_y, rect_width, rect_height)
+        # Obtener dimensiones de la imagen
+        img_height, img_width = st.session_state.uploaded_image.shape[:2]
         
-        # Mostrar imagen
-        st.image(cv2.cvtColor(image_with_rect, cv2.COLOR_BGR2RGB), 
-                use_column_width=True,
-                caption="Imagen con área de escaneo - Los dígitos deben estar dentro del rectángulo verde")
+        # Controles para el área de selección
+        col1, col2 = st.sidebar.columns(2)
         
-        # Procesar al hacer clic
-        if st.button("🔍 Escanear Dígitos con OCR Online", type="primary", use_container_width=True):
-            # Extraer ROI
-            roi = get_roi(image, rect_x, rect_y, rect_width, rect_height)
+        with col1:
+            x = st.slider("Posición X", 0, img_width - 50, 100, 10, 
+                         key="x_slider")
+            width = st.slider("Ancho", 50, img_width - x, 300, 10,
+                             key="width_slider")
+        
+        with col2:
+            y = st.slider("Posición Y", 0, img_height - 50, 100, 10,
+                         key="y_slider")
+            height = st.slider("Alto", 50, img_height - y, 150, 10,
+                              key="height_slider")
+        
+        # Actualizar coordenadas
+        st.session_state.selection_coords = {
+            'x': x, 'y': y, 'width': width, 'height': height
+        }
+        
+        # Mostrar información del área seleccionada
+        st.sidebar.markdown(f"""
+        <div class="selection-info">
+            <strong>Área Seleccionada:</strong><br>
+            • Posición: ({x}, {y})<br>
+            • Tamaño: {width} × {height} px<br>
+            • Área: {width * height} px²
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Botón para analizar
+        st.sidebar.subheader("🔍 Paso 3: Analizar")
+        if st.sidebar.button("🚀 Analizar Área Seleccionada", use_container_width=True, type="primary"):
+            # Extraer ROI basado en la selección actual
+            roi = get_roi(
+                st.session_state.uploaded_image,
+                st.session_state.selection_coords['x'],
+                st.session_state.selection_coords['y'],
+                st.session_state.selection_coords['width'],
+                st.session_state.selection_coords['height']
+            )
             
             if roi.size > 0:
                 # Preprocesar imagen
-                processed_roi = preprocess_image(roi)
-                
-                # Mostrar imagen procesada
-                with st.expander("🖼️ Ver área de escaneo (procesada)"):
-                    st.image(processed_roi, 
-                            use_column_width=True,
-                            caption="Área que se enviará al OCR",
-                            clamp=True)
+                st.session_state.processed_roi = preprocess_image(roi)
                 
                 # Extraer dígitos usando API
                 digits, _ = extract_digits_with_api(roi)
                 
                 st.session_state.captured_digits = digits
-                st.session_state.captured_image = roi
+                st.session_state.selection_made = True
                 
                 if digits and not digits.startswith("Error") and not digits.startswith("No se"):
-                    st.success(f"✅ Dígitos detectados: **{digits}**")
-                    st.balloons()
+                    st.sidebar.success(f"✅ Dígitos detectados: {digits}")
                 else:
-                    st.warning(f"⚠️ {digits}")
-                    st.markdown("""
-                    **💡 Consejos para mejor detección:**
-                    - Asegúrate de que los dígitos estén dentro del rectángulo verde
-                    - Usa imágenes con buen contraste
-                    - Dígitos oscuros sobre fondo claro funcionan mejor
-                    - Evita imágenes borrosas o con mucho ruido
-                    """)
+                    st.sidebar.warning(f"⚠️ {digits}")
             else:
-                st.error("❌ El área de escaneo está fuera de los límites de la imagen")
+                st.sidebar.error("❌ El área seleccionada no es válida")
+
+    # Área principal
+    col1, col2 = st.columns([2, 1])
     
-    # Mostrar resultados
-    st.markdown("---")
-    st.subheader("📊 Resultados")
-    
-    if st.session_state.captured_digits and not st.session_state.captured_digits.startswith("Error") and not st.session_state.captured_digits.startswith("No se"):
-        st.markdown(f'<div class="digits-result">{st.session_state.captured_digits}</div>', 
-                   unsafe_allow_html=True)
+    with col1:
+        st.subheader("🖼️ Vista Previa de la Imagen")
         
-        # Botones de acción
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("📋 Copiar Resultados", use_container_width=True):
-                st.code(st.session_state.captured_digits)
-                st.success("✅ Resultados copiados!")
-        with col2:
-            if st.button("🔄 Nueva Imagen", use_container_width=True):
-                st.session_state.captured_digits = ""
-                st.session_state.captured_image = None
-                st.rerun()
-    
-    else:
-        st.info("""
-        <div class="info-box">
-            <h3>👆 Cómo usar esta aplicación:</h3>
-            <ol>
-                <li><strong>Sube una imagen</strong> que contenga dígitos</li>
-                <li><strong>Ajusta el área de escaneo</strong> en la barra lateral</li>
-                <li><strong>Haz clic en "Escanear Dígitos"</strong> para procesar con OCR online</li>
-                <li><strong>Copia los resultados</strong> detectados</li>
-            </ol>
+        if st.session_state.uploaded_image is not None:
+            # Dibujar rectángulo en la imagen
+            image_with_rect = draw_scanner_zone(
+                st.session_state.uploaded_image,
+                st.session_state.selection_coords['x'],
+                st.session_state.selection_coords['y'],
+                st.session_state.selection_coords['width'],
+                st.session_state.selection_coords['height']
+            )
             
-            <p><strong>🎯 Características:</strong></p>
-            <ul>
-                <li>✅ No requiere instalación de Tesseract</li>
-                <li>✅ Funciona inmediatamente en Streamlit Cloud</li>
-                <li>✅ Procesamiento con API OCR profesional</li>
-                <li>✅ Interfaz simple y rápida</li>
-            </ul>
-        </div>
-        """, unsafe_allow_html=True)
+            # Mostrar imagen con el rectángulo
+            st.image(
+                cv2.cvtColor(image_with_rect, cv2.COLOR_BGR2RGB),
+                use_column_width=True,
+                caption=f"Área seleccionada para análisis - Ajusta los controles en la barra lateral"
+            )
+            
+            # Mostrar área procesada si está disponible
+            if st.session_state.processed_roi is not None:
+                with st.expander("🔍 Ver Área Seleccionada (Procesada)"):
+                    st.image(
+                        st.session_state.processed_roi,
+                        use_column_width=True,
+                        caption="Esta es el área que se enviará al OCR",
+                        clamp=True
+                    )
+        else:
+            st.info("""
+            <div class="info-box">
+                <h3>👆 Para comenzar:</h3>
+                <ol>
+                    <li><strong>Sube una imagen</strong> en la barra lateral</li>
+                    <li><strong>Ajusta el área de análisis</strong> con los controles deslizantes</li>
+                    <li><strong>Haz clic en "Analizar Área Seleccionada"</strong></li>
+                    <li><strong>Revisa los resultados</strong> en el panel derecho</li>
+                </ol>
+            </div>
+            """, unsafe_allow_html=True)
     
-    # Información técnica
-    with st.expander("ℹ️ Información Técnica"):
+    with col2:
+        st.subheader("📊 Resultados del Análisis")
+        
+        if st.session_state.captured_digits and not st.session_state.captured_digits.startswith("Error") and not st.session_state.captured_digits.startswith("No se"):
+            st.markdown(f'<div class="digits-result">{st.session_state.captured_digits}</div>', 
+                       unsafe_allow_html=True)
+            
+            # Botones de acción
+            col_btn1, col_btn2 = st.columns(2)
+            with col_btn1:
+                if st.button("📋 Copiar Resultados", use_container_width=True):
+                    st.code(st.session_state.captured_digits)
+                    st.success("✅ Resultados copiados!")
+            with col_btn2:
+                if st.button("🔄 Nueva Selección", use_container_width=True):
+                    st.session_state.captured_digits = ""
+                    st.session_state.processed_roi = None
+                    st.session_state.selection_made = False
+                    st.rerun()
+            
+            # Consejos para mejor detección
+            with st.expander("💡 Consejos para mejor precisión"):
+                st.markdown("""
+                - **Ajusta el área** para que cubra solo los dígitos
+                - **Evita incluir** fondo innecesario
+                - **Buena iluminación** en la imagen original
+                - **Contraste alto** entre dígitos y fondo
+                - **Fuentes claras** y legibles
+                """)
+        
+        elif st.session_state.selection_made:
+            st.warning(f"⚠️ {st.session_state.captured_digits}")
+            st.markdown("""
+            **Sugerencias:**
+            - Ajusta el área de selección
+            - Verifica que la imagen sea clara
+            - Intenta con otra región de la imagen
+            """)
+        
+        else:
+            st.info("""
+            <div class="info-box">
+                <h3>📝 Resultados</h3>
+                <p>Los dígitos detectados aparecerán aquí después del análisis.</p>
+                
+                <p><strong>Características:</strong></p>
+                <ul>
+                    <li>✅ Selección interactiva del área</li>
+                    <li>✅ Ajuste en tiempo real</li>
+                    <li>✅ Procesamiento con OCR profesional</li>
+                    <li>✅ Copia fácil de resultados</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
+    
+    # Información adicional
+    with st.expander("ℹ️ Instrucciones Detalladas"):
         st.markdown("""
-        **Tecnologías utilizadas:**
-        - 🚀 **Streamlit** - Interfaz de usuario
-        - 📷 **OpenCV** - Procesamiento de imágenes
-        - 🌐 **OCR.space API** - Reconocimiento óptico de caracteres
-        - 🐍 **Python** - Lógica de la aplicación
+        ### 🎯 Cómo Usar Esta Aplicación
         
-        **Ventajas de este approach:**
-        - ✅ Funciona inmediatamente en Streamlit Cloud
-        - ✅ No requiere instalación de dependencias complejas
-        - ✅ Usa motores OCR profesionales
-        - ✅ Escalable y confiable
+        **Paso 1: Subir Imagen**
+        - Ve a la barra lateral y selecciona "Selecciona una imagen con dígitos"
+        - Sube cualquier imagen en formato JPG, PNG o JPEG
+        - La imagen se mostrará inmediatamente en el área principal
         
-        **Límites:**
-        - ⚠️ API gratuita tiene límites de uso
-        - ⚠️ Requiere conexión a internet
-        - ⚠️ Puede ser más lento que solución local
+        **Paso 2: Seleccionar Área de Análisis**
+        - Usa los controles deslizantes en la barra lateral para ajustar:
+          - **Posición X/Y**: Mueve el rectángulo verde
+          - **Ancho/Alto**: Cambia el tamaño del área
+        - El rectángulo verde se actualiza en tiempo real
         
-        **Para uso local:** Puedes cambiar a Tesseract local para mejor rendimiento.
+        **Paso 3: Analizar**
+        - Haz clic en "Analizar Área Seleccionada"
+        - La aplicación enviará solo el área seleccionada al OCR
+        - Los resultados aparecerán en el panel derecho
+        
+        **Paso 4: Refinar (Opcional)**
+        - Si no detecta bien, ajusta el área y vuelve a analizar
+        - Puedes copiar los resultados con el botón correspondiente
+        
+        ### 🚀 Características Técnicas
+        - **OCR Online**: Usa API profesional para mejor precisión
+        - **Selección Interactiva**: Elige exactamente qué área analizar
+        - **Tiempo Real**: Los cambios se ven inmediatamente
+        - **Sin Instalación**: Funciona completamente en la nube
         """)
 
 if __name__ == "__main__":
