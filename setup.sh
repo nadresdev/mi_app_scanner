@@ -12,4 +12,4 @@ tesseract --version
 echo "=== Verificando rutas ==="
 which tesseract
 
-echo "✅ Tesseract instalado correctamente"
+echo "✅ Tesseract instalado correctamente "
