@@ -26,6 +26,35 @@ def setup_ocr():
 OCR_AVAILABLE, API_KEY = setup_ocr()
 
 # ========== FUNCIONES DE LA APLICACIÓN ==========
+def draw_scanner_zone(image, x, y, width, height, color=(0, 255, 0), thickness=2):
+    """Dibuja el rectángulo de escaneo en la imagen"""
+    img_copy = image.copy()
+    
+    # Rectángulo principal
+    cv2.rectangle(img_copy, (x, y), (x + width, y + height), color, thickness)
+    
+    # Esquinas decorativas
+    corner_length = 20
+    corner_thickness = 3
+    
+    # Esquina superior izquierda
+    cv2.line(img_copy, (x, y), (x + corner_length, y), color, corner_thickness)
+    cv2.line(img_copy, (x, y), (x, y + corner_length), color, corner_thickness)
+    
+    # Esquina superior derecha
+    cv2.line(img_copy, (x + width, y), (x + width - corner_length, y), color, corner_thickness)
+    cv2.line(img_copy, (x + width, y), (x + width, y + corner_length), color, corner_thickness)
+    
+    # Esquina inferior izquierda
+    cv2.line(img_copy, (x, y + height), (x + corner_length, y + height), color, corner_thickness)
+    cv2.line(img_copy, (x, y + height), (x, y + height - corner_length), color, corner_thickness)
+    
+    # Esquina inferior derecha
+    cv2.line(img_copy, (x + width, y + height), (x + width - corner_length, y + height), color, corner_thickness)
+    cv2.line(img_copy, (x + width, y + height), (x + width, y + height - corner_length), color, corner_thickness)
+    
+    return img_copy
+
 def get_roi(image, x, y, width, height):
     """Extrae región de interés"""
     return image[y:y + height, x:x + width]
@@ -126,13 +155,13 @@ def preprocess_image(image):
 
 # ========== APLICACIÓN STREAMLIT ==========
 st.set_page_config(
-    page_title="Escáner de Dígitos - Cámara en Tiempo Real",
+    page_title="Escáner de Dígitos - Cámara con Rectángulo",
     page_icon="📱",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# CSS y JavaScript para el overlay en tiempo real
+# CSS personalizado
 st.markdown("""
 <style>
     .main {
@@ -164,34 +193,24 @@ st.markdown("""
         margin: 10px 0;
     }
     .camera-container {
-        position: relative;
         border: 3px solid #00cc00;
         border-radius: 15px;
         padding: 10px;
         background: #000;
         margin: 10px 0;
-        overflow: hidden;
     }
-    .scanner-overlay {
-        position: absolute;
-        border: 3px solid #00ff00;
-        border-radius: 10px;
-        pointer-events: none;
-        z-index: 1000;
-        box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.3);
+    .success-box {
+        background-color: #e8f5e8;
+        padding: 20px;
+        border-radius: 15px;
+        border-left: 5px solid #4CAF50;
     }
-    .overlay-content {
-        position: absolute;
-        top: -30px;
-        left: 0;
-        right: 0;
+    .live-preview {
+        background: linear-gradient(45deg, #000000, #001a00);
+        padding: 20px;
+        border-radius: 15px;
+        border: 2px solid #00cc00;
         text-align: center;
-        color: #00ff00;
-        font-weight: bold;
-        font-size: 14px;
-        background: rgba(0, 0, 0, 0.7);
-        padding: 5px;
-        border-radius: 5px;
     }
     @media (max-width: 768px) {
         .digits-result {
@@ -199,110 +218,10 @@ st.markdown("""
             padding: 20px;
         }
     }
-    
-    /* Estilos para el contenedor de cámara personalizado */
-    .camera-wrapper {
-        position: relative;
-        width: 100%;
-        max-width: 640px;
-        margin: 0 auto;
-    }
-    
-    /* Asegurar que la cámara ocupe todo el espacio */
-    .stCameraInput > div {
-        width: 100% !important;
-    }
-    
-    .stCameraInput video {
-        width: 100% !important;
-        height: auto !important;
-        border-radius: 10px;
-    }
 </style>
-
-<script>
-// Función para actualizar el overlay del rectángulo
-function updateScannerOverlay(x, y, width, height) {
-    // Eliminar overlay existente
-    const existingOverlay = document.getElementById('scanner-overlay');
-    if (existingOverlay) {
-        existingOverlay.remove();
-    }
-    
-    // Crear nuevo overlay
-    const overlay = document.createElement('div');
-    overlay.id = 'scanner-overlay';
-    overlay.className = 'scanner-overlay';
-    overlay.style.left = x + 'px';
-    overlay.style.top = y + 'px';
-    overlay.style.width = width + 'px';
-    overlay.style.height = height + 'px';
-    
-    // Agregar texto informativo
-    const overlayContent = document.createElement('div');
-    overlayContent.className = 'overlay-content';
-    overlayContent.textContent = 'Área de Escaneo - Alinea los dígitos aquí';
-    overlay.appendChild(overlayContent);
-    
-    // Agregar al contenedor de cámara
-    const cameraContainer = document.querySelector('[data-testid="stCameraInput"]');
-    if (cameraContainer) {
-        cameraContainer.style.position = 'relative';
-        cameraContainer.appendChild(overlay);
-    }
-}
-
-// Escuchar cambios en los sliders de Streamlit
-function setupSliderListeners() {
-    // Los sliders de Streamlit generan eventos cuando cambian
-    const observer = new MutationObserver(function(mutations) {
-        mutations.forEach(function(mutation) {
-            if (mutation.type === 'attributes') {
-                // Buscar valores actuales de los sliders
-                const sliders = document.querySelectorAll('input[type="range"]');
-                let x = 100, y = 150, width = 200, height = 100;
-                
-                sliders.forEach((slider, index) => {
-                    const value = parseInt(slider.value);
-                    switch(index) {
-                        case 0: x = value; break;
-                        case 1: y = value; break;
-                        case 2: width = value; break;
-                        case 3: height = value; break;
-                    }
-                });
-                
-                updateScannerOverlay(x, y, width, height);
-            }
-        });
-    });
-    
-    // Observar cambios en el documento
-    observer.observe(document.body, {
-        attributes: true,
-        subtree: true,
-        attributeFilter: ['value', 'style', 'class']
-    });
-}
-
-// Inicializar cuando la página cargue
-document.addEventListener('DOMContentLoaded', function() {
-    setTimeout(setupSliderListeners, 1000);
-    
-    // Actualizar inicialmente
-    updateScannerOverlay(100, 150, 200, 100);
-});
-
-// También actualizar cuando Streamlit termine de renderizar
-if (window.Streamlit) {
-    window.Streamlit.onRender(function() {
-        setTimeout(setupSliderListeners, 500);
-    });
-}
-</script>
 """, unsafe_allow_html=True)
 
-st.title("📱 Escáner de Dígitos - Cámara en Tiempo Real")
+st.title("📱 Escáner de Dígitos - Cámara con Rectángulo")
 st.markdown("---")
 
 def main():
@@ -322,44 +241,34 @@ def main():
         st.session_state.rect_height = 100
 
     # Sidebar para configuración
-    st.sidebar.title("⚙️ Configuración del Área de Escaneo")
+    st.sidebar.title("⚙️ Configuración del Rectángulo")
     
     # Configuración del área de escaneo
-    st.sidebar.subheader("🎯 Ajustar Rectángulo en Tiempo Real")
+    st.sidebar.subheader("🎯 Ajustar Rectángulo Verde")
     
-    # Usar st.empty() para actualizaciones en tiempo real
-    x_placeholder = st.sidebar.empty()
-    y_placeholder = st.sidebar.empty()
-    width_placeholder = st.sidebar.empty()
-    height_placeholder = st.sidebar.empty()
-    
-    # Actualizar sliders en tiempo real
-    st.session_state.rect_x = x_placeholder.slider(
+    # Sliders con valores por defecto optimizados para móviles
+    st.session_state.rect_x = st.sidebar.slider(
         "Posición Horizontal (X)", 
         50, 400, st.session_state.rect_x, 10,
-        key="x_slider",
-        help="Mueve el rectángulo izquierda/derecha - Cambios se ven en tiempo real"
+        help="Posición izquierda/derecha del rectángulo"
     )
     
-    st.session_state.rect_y = y_placeholder.slider(
+    st.session_state.rect_y = st.sidebar.slider(
         "Posición Vertical (Y)", 
         50, 400, st.session_state.rect_y, 10,
-        key="y_slider",
-        help="Mueve el rectángulo arriba/abajo - Cambios se ven en tiempo real"
+        help="Posición arriba/abajo del rectángulo"
     )
     
-    st.session_state.rect_width = width_placeholder.slider(
+    st.session_state.rect_width = st.sidebar.slider(
         "Ancho del Rectángulo", 
         100, 400, st.session_state.rect_width, 10,
-        key="width_slider",
-        help="Ajusta el ancho - Cambios se ven en tiempo real"
+        help="Ancho del área de escaneo"
     )
     
-    st.session_state.rect_height = height_placeholder.slider(
+    st.session_state.rect_height = st.sidebar.slider(
         "Alto del Rectángulo", 
         50, 300, st.session_state.rect_height, 10,
-        key="height_slider",
-        help="Ajusta el alto - Cambios se ven en tiempo real"
+        help="Alto del área de escaneo"
     )
     
     st.sidebar.markdown("---")
@@ -370,37 +279,29 @@ def main():
     - **Posición:** ({st.session_state.rect_x}, {st.session_state.rect_y})
     - **Tamaño:** {st.session_state.rect_width} × {st.session_state.rect_height} px
     
-    **👀 Verás los cambios en tiempo real:**
-    - El rectángulo verde se mueve instantáneamente
-    - Puedes ajustar mientras ves la cámara
-    - Perfecto para alinear dígitos exactamente
+    **🎯 Instrucciones:**
+    1. Mira la vista de cámara a la derecha →
+    2. Ajusta estos controles para mover el rectángulo
+    3. Alinea los dígitos DENTRO del rectángulo verde
+    4. Captura la imagen
     """)
 
-    # Área principal - Cámara con overlay en tiempo real
-    st.subheader("📷 Cámara en Vivo con Rectángulo de Escaneo")
+    # Área principal
+    st.subheader("📷 Vista de Cámara con Rectángulo de Escaneo")
     
     # Instrucciones
     st.info("""
-    **🎯 ¡El rectángulo verde aparece en TIEMPO REAL!**
-    - **Ajusta los controles** en la barra lateral ←
-    - **Ve los cambios instantáneamente** en la cámara
-    - **Alinea los dígitos** dentro del rectángulo verde
-    - **Captura** cuando estén perfectamente alineados
+    **👀 El rectángulo verde aparece DIRECTAMENTE en la imagen de la cámara**
+    - Ajusta los controles en la barra lateral para moverlo
+    - Alinea los dígitos que quieres escanear DENTRO del rectángulo
+    - Solo esa área se analizará al capturar
     """)
-    
-    # Contenedor para la cámara con overlay
-    st.markdown("""
-    <div class="camera-wrapper">
-        <div class="camera-container">
-    """, unsafe_allow_html=True)
     
     # Usar el componente de cámara de Streamlit
     camera_image = st.camera_input(
-        "Mira la cámara - El rectángulo verde se actualiza en tiempo real al mover los controles",
-        key="camera_input_live"
+        "Apunta la cámara a los dígitos - El rectángulo verde muestra el área que se analizará",
+        key="camera_input"
     )
-    
-    st.markdown("</div></div>", unsafe_allow_html=True)
     
     if camera_image is not None:
         # Convertir la imagen de la cámara a OpenCV
@@ -408,11 +309,26 @@ def main():
         image_array = np.frombuffer(image_bytes, np.uint8)
         original_image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
         
-        # Mostrar confirmación visual del área que se analizará
-        st.success(f"✅ Imagen capturada - Se analizará el área dentro del rectángulo verde")
+        # Dibujar rectángulo DIRECTAMENTE en la imagen capturada
+        image_with_rect = draw_scanner_zone(
+            original_image, 
+            st.session_state.rect_x,
+            st.session_state.rect_y, 
+            st.session_state.rect_width,
+            st.session_state.rect_height
+        )
         
-        # Mostrar preview del área exacta que se analizará
-        with st.expander("🔍 Ver Área Exacta que se Analizará", expanded=True):
+        # Mostrar imagen con el rectángulo integrado
+        st.markdown('<div class="camera-container">', unsafe_allow_html=True)
+        st.image(
+            cv2.cvtColor(image_with_rect, cv2.COLOR_BGR2RGB),
+            use_column_width=True,
+            caption=f"✅ Imagen capturada - El área dentro del rectángulo verde será analizada"
+        )
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        # Mostrar el área exacta que se analizará
+        with st.expander("🔍 Ver Área Exacta a Analizar", expanded=True):
             # Extraer el área del rectángulo
             roi = get_roi(
                 original_image, 
@@ -429,7 +345,7 @@ def main():
                     st.image(
                         cv2.cvtColor(roi, cv2.COLOR_BGR2RGB),
                         use_column_width=True,
-                        caption=f"Área exacta a analizar ({st.session_state.rect_width}×{st.session_state.rect_height}px)"
+                        caption=f"Área exacta ({st.session_state.rect_width}×{st.session_state.rect_height}px)"
                     )
                 
                 with col2:
@@ -440,33 +356,19 @@ def main():
                         caption="Versión procesada para OCR",
                         clamp=True
                     )
+                
+                st.success(f"✅ Se analizará esta área específica de {st.session_state.rect_width}×{st.session_state.rect_height}px")
+            else:
+                st.error("❌ El área seleccionada no es válida")
         
-        # Botón para analizar el área del rectángulo
+        # Botón para analizar
         st.markdown("---")
-        st.subheader("🚀 ¿Analizar esta área?")
-        
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
-            analyze_button = st.button(
-                "🎯 SÍ, ANALIZAR ÁREA SELECCIONADA", 
-                use_container_width=True, 
-                type="primary",
-                key="analyze_button"
-            )
-            
-            if analyze_button:
-                with st.spinner("Analizando dígitos en el área seleccionada..."):
-                    # Extraer EXACTAMENTE el área dentro del rectángulo
-                    roi = get_roi(
-                        original_image, 
-                        st.session_state.rect_x,
-                        st.session_state.rect_y, 
-                        st.session_state.rect_width,
-                        st.session_state.rect_height
-                    )
-                    
+            if st.button("🎯 ANALIZAR ÁREA SELECCIONADA", use_container_width=True, type="primary"):
+                with st.spinner("Procesando área seleccionada..."):
                     if roi.size > 0:
-                        # Extraer dígitos usando API
+                        # Extraer dígitos del área del rectángulo
                         digits, _ = extract_digits_with_api(roi)
                         
                         st.session_state.camera_captured = original_image
@@ -478,8 +380,6 @@ def main():
                             st.balloons()
                         else:
                             st.warning("⚠️ No se detectaron dígitos en el área seleccionada")
-                    else:
-                        st.error("❌ El área de escaneo seleccionada no es válida")
     
     # Mostrar resultados
     st.markdown("---")
@@ -492,7 +392,7 @@ def main():
                        unsafe_allow_html=True)
             
             # Información del análisis
-            st.success(f"✅ Se analizó un área de {st.session_state.rect_width}×{st.session_state.rect_height}px en posición ({st.session_state.rect_x}, {st.session_state.rect_y})")
+            st.success(f"✅ Área analizada: {st.session_state.rect_width}×{st.session_state.rect_height}px en posición ({st.session_state.rect_x}, {st.session_state.rect_y})")
             
             # Botones de acción
             col_btn1, col_btn2 = st.columns(2)
@@ -510,11 +410,11 @@ def main():
         else:
             st.warning(f"⚠️ {st.session_state.captured_digits}")
             st.info("""
-            **💡 Sugerencias:**
-            - Ajusta el rectángulo para cubrir mejor los dígitos
+            **💡 Sugerencias para mejor detección:**
+            - Ajusta el rectángulo para cubrir completamente los dígitos
             - Mejora la iluminación
-            - Verifica que los dígitos estén completamente dentro del rectángulo
-            - Los dígitos deben tener buen contraste
+            - Verifica que los dígitos estén nítidos y con buen contraste
+            - Los dígitos deben estar completamente dentro del área verde
             """)
     
     else:
@@ -523,15 +423,41 @@ def main():
             <h3>👆 Listo para Escanear</h3>
             <p>Los dígitos detectados aparecerán aquí después del análisis.</p>
             
-            <p><strong>🎯 Características en Tiempo Real:</strong></p>
-            <ul>
-                <li>Rectángulo verde SUPERPUESTO en la cámara</li>
-                <li>Cambios INSTANTÁNEOS al mover los controles</li>
-                <li>Precisión milimétrica para alinear dígitos</li>
-                <li>Solo analiza el área dentro del rectángulo</li>
-            </ul>
+            <p><strong>🎯 Cómo funciona:</strong></p>
+            <ol>
+                <li>El <strong>rectángulo verde</strong> aparece en la imagen de la cámara</li>
+                <li><strong>Ajusta su posición y tamaño</strong> desde la barra lateral</li>
+                <li><strong>Alinea los dígitos</strong> dentro del rectángulo</li>
+                <li><strong>Captura la imagen</strong> y confirma el área a analizar</li>
+                <li><strong>Revisa los resultados</strong> aquí abajo</li>
+            </ol>
         </div>
         """, unsafe_allow_html=True)
+    
+    # Información adicional
+    with st.expander("ℹ️ Acerca del Escáner"):
+        st.markdown("""
+        ### 🎯 Tecnología Utilizada
+        
+        **Proceso de Escaneo:**
+        1. **Vista de cámara** con rectángulo superpuesto
+        2. **Captura de imagen** con el área visualizada
+        3. **Extracción automática** del área dentro del rectángulo verde
+        4. **Procesamiento OCR** específico de esa área
+        5. **Resultados** de los dígitos detectados
+        
+        **Ventajas:**
+        - ✅ Sabes exactamente qué área se analizará
+        - ✅ Precisión milimétrica para seleccionar dígitos
+        - ✅ Evita análisis de áreas innecesarias
+        - ✅ Interface visual e intuitiva
+        
+        **Para mejor precisión:**
+        - Buena iluminación de los dígitos
+        - Dígitos contrastados con el fondo
+        - Enfoque nítido en la cámara
+        - Rectángulo ajustado al tamaño exacto de los dígitos
+        """)
 
 if __name__ == "__main__":
     main()
